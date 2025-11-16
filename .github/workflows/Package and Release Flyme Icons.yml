@@ -1,0 +1,37 @@
+name: Package and Release Flyme Icons
+
+on:
+  push:
+    paths:
+      - 'module/module.prop'  # 监听module.prop文件的更新
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract raw version string
+        id: version
+        run: |
+          # 直接提取等号后的完整内容（保留v前缀）
+          RAW_VERSION=$(grep 'version=' module/module.prop | cut -d'=' -f2)
+          echo "Extracted raw version: $RAW_VERSION"
+          echo "version=$RAW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package module directory
+        run: |
+          zip -r "Flyme-icons-${{ steps.version.outputs.version }}.zip" module/
+
+      - name: Create Release with Dynamic Tag
+        uses: softprops/action-gh-release@v1
+        with:
+          # 直接使用原始版本字符串作为Tag（如v1.8.0）
+          tag_name: "${{ steps.version.outputs.version }}"
+          name: "Flyme Icons ${{ steps.version.outputs.version }}"
+          body: "Automated release for module update"
+          files: |
+            Flyme-icons-${{ steps.version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
