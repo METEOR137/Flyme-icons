@@ -37,7 +37,7 @@ jobs:
           git config user.email "github-actions@github.com"
           
           # 添加更改并提交
-          git add update.json
+          git add updatelog.md
           git commit -m "Update release notes from release ${{ github.event.release.tag_name }}"
           
           # 推送更改到仓库
