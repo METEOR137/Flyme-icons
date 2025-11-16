@@ -27,7 +27,7 @@ jobs:
   "version": "${{ steps.parse.outputs.tag }}",
   "versionCode": ${{ steps.parse.outputs.version_code }},
   "zipUrl": "${{ github.event.release.zipball_url }}",
-  "changelog": "https://raw.githubusercontent.com/METEOR137/Flyme-icons/refs/heads/main/updatelog.json"
+  "changelog": "https://raw.githubusercontent.com/METEOR137/Flyme-icons/refs/heads/main/updatelog.md"
 }
 EOF
 
