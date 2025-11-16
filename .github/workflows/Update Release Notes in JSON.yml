@@ -1,0 +1,44 @@
+name: Update Release Notes in JSON
+
+on:
+  release:
+    types: [published]  # 仅在正式发布时触发
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 需要设置persist-credentials=true以便后续提交更改
+          persist-credentials: true
+
+      - name: Get release notes content
+        id: release-notes
+        run: |
+          # 从GitHub事件中提取release notes内容
+          echo "notes<<EOF" >> $GITHUB_ENV
+          echo "${{ github.event.release.body }}" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        # 注意：这里使用heredoc格式安全地传递多行文本
+
+      - name: Write to update.json
+        run: |
+          # 将release notes内容写入JSON文件
+          echo "${{ env.notes }}" > update.json
+          # 检查文件是否生成
+          cat update.json
+
+      - name: Commit and push changes
+        run: |
+          # 配置Git用户信息
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # 添加更改并提交
+          git add update.json
+          git commit -m "Update release notes from release ${{ github.event.release.tag_name }}"
+          
+          # 推送更改到仓库
+          git push origin HEAD:${{ github.ref }}
