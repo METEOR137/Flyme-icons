@@ -9,10 +9,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout main branch
         uses: actions/checkout@v4
         with:
+          # 明确检出 main 分支，避免处于 detached HEAD
+          ref: main
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup environment variables
         id: setvars
@@ -62,11 +65,29 @@ jobs:
           # 写入文件
           echo "$JSON_CONTENT" > update.json
 
-      - name: Commit and push changes
+      - name: Commit and push changes to main (safe)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
+          # 确保在 main 分支
+          git checkout main || git switch main
+
+          # 将本地仓库与远端 main 同步（确保 rebase 本地修改在最新的远端之上）
+          git fetch origin main
+          git reset --mixed origin/main
+
           git add update.json
+
+          # 如果没有暂存的改动则跳过提交
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
           git commit -m "chore: update version to $NEW_VERSION"
-          git push origin HEAD:main
+
+          # 在推送前再拉取远端最新并 rebase（若远端已变更，rebase 会把我们的 commit 放到最新之上）
+          git pull --rebase origin main || (git rebase --abort && echo "Rebase failed" && exit 1)
+
+          git push origin main
