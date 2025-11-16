@@ -1,102 +1,72 @@
-name: 更新下载json.yml
+name: Update JSON on Release
 
 on:
   release:
     types: [published]
 
-# 确保有写权限
-permissions:
-  contents: write
-
 jobs:
   update-json:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
           fetch-depth: 0
 
-      - name: Show event info (debug)
+      - name: Setup environment variables
+        id: setvars
         run: |
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Ref: $GITHUB_REF"
-          echo "Event: $GITHUB_EVENT_NAME"
-          echo "Release JSON:"
-          cat $GITHUB_EVENT_PATH || true
+          # 提取纯数字版本号 (移除 'v' 和点号)
+          CLEAN_VERSION=$(echo ${{ github.event.release.tag_name }} | tr -d 'v.' | sed 's/^0*//')
+          
+          # 确保版本号是数字
+          if ! [[ "$CLEAN_VERSION" =~ ^[0-9]+$ ]]; then
+            echo "Error: Version code must be a number"
+            exit 1
+          fi
+          
+          # 设置输出变量
+          echo "VERSION_CODE=$CLEAN_VERSION" >> $GITHUB_ENV
+          echo "NEW_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
 
-      - name: Extract version and calculate versionCode
-        id: parse
-        shell: bash
+      - name: Find release asset URL
+        id: findasset
         run: |
-          set -euo pipefail
-          TAG="${{ github.event.release.tag_name }}"
-          echo "Detected tag: '$TAG'"
+          # 查找第一个 zip 格式的发布资源
+          ZIP_URL=$(curl -s \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.release.tag_name }} \
+            | jq -r '.assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -1)
 
-          # 去掉开头的 'v' 或 'V'
-          VER="${TAG#v}"
-          VER="${VER#V}"
-          echo "Trimmed version: '$VER'"
-
-          # 使用 regex 提取 MAJOR.MINOR.PATCH （允许缺省 minor/patch）
-          if [[ "$VER" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))? ]]; then
-            MAJOR="${BASH_REMATCH[1]}"
-            MINOR="${BASH_REMATCH[3]:-0}"
-            PATCH="${BASH_REMATCH[5]:-0}"
-            echo "Parsed version parts: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH"
-          else
-            echo "Warning: tag '$TAG' does not match X.Y.Z pattern. Defaulting to 0.0.0"
-            MAJOR=0; MINOR=0; PATCH=0
+          if [ -z "$ZIP_URL" ]; then
+            echo "Error: No zip asset found in release"
+            exit 1
           fi
 
-          # 计算 versionCode（如: MAJOR*10000 + MINOR*100 + PATCH）
-          VERSION_CODE=$((MAJOR*10000 + MINOR*100 + PATCH))
-          echo "Calculated versionCode=$VERSION_CODE"
-
-          # 导出 outputs
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          # 添加代理前缀
+          PROXIED_URL="https://v6.gh-proxy.com/$ZIP_URL"
+          echo "ZIP_URL=$PROXIED_URL" >> $GITHUB_ENV
 
       - name: Update update.json
         run: |
-          set -euo pipefail
-          echo "Writing update.json..."
-          cat > update.json << EOF
-{
-  "version": "${{ steps.parse.outputs.tag }}",
-  "versionCode": ${{ steps.parse.outputs.version_code }},
-  "zipUrl": "${{ github.event.release.zipball_url }}",
-  "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/main/updatelog.md"
-}
-EOF
-          echo "---- update.json ----"
-          cat update.json
-          echo "---------------------"
+          # 创建新的 JSON 内容
+          JSON_CONTENT=$(jq -n \
+            --arg version "$NEW_VERSION" \
+            --arg versionCode "$VERSION_CODE" \
+            --arg zipUrl "$ZIP_URL" \
+            --arg changelog "https://raw.githubusercontent.com/${{ github.repository }}/main/updatelog.md" \
+            '{version: $version, versionCode: $versionCode, zipUrl: $zipUrl, changelog: $changelog}')
 
-      - name: Commit and push changes if changed
-        env:
-          REPO: ${{ github.repository }}
+          # 写入文件
+          echo "$JSON_CONTENT" > update.json
+
+      - name: Commit and push changes
         run: |
-          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
+          
           git add update.json
-
-          if git diff --cached --quiet; then
-            echo "No changes to update.json, skipping commit."
-            exit 0
-          fi
-
-          git commit -m "chore: update update.json for ${{ steps.parse.outputs.tag }}"
-
-          echo "Attempting to push to refs/heads/main..."
-          # 首先尝试用內建的令牌（actions/checkout persist-credentials:true）推送
-          if git push origin HEAD:refs/heads/main; then
-            echo "Push succeeded."
-          else
-            echo "Push via origin failed. Possible branch protection or permission issue."
-            echo "Attempting authenticated push using GITHUB_TOKEN (may expose in logs — this is fallback only)."
-            git push "https://${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.git" HEAD:refs/heads/main
-          fi
+          git commit -m "chore: update version to $NEW_VERSION"
+          git push origin HEAD:main
