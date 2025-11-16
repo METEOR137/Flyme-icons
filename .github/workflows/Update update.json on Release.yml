@@ -4,20 +4,34 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   update-json:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
 
       - name: Extract version and calculate versionCode
         id: parse
         run: |
-          TAG=${{ github.event.release.tag_name }}
+          TAG="${{ github.event.release.tag_name }}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          # 提取纯数字：移除v，替换.为，如v1.8.0 → 180
-          VERSION_CODE=$(echo "$TAG" | sed -E 's/v([0-9]+)\.([0-9]+)\.([0-9]+)/\1\2\3/')
+
+          # Remove leading 'v' if present and split into parts
+          VER="${TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+
+          # versionCode formula: MAJOR*10000 + MINOR*100 + PATCH
+          VERSION_CODE=$((MAJOR*10000 + MINOR*100 + PATCH))
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
 
       - name: Update update.json
@@ -27,14 +41,25 @@ jobs:
   "version": "${{ steps.parse.outputs.tag }}",
   "versionCode": ${{ steps.parse.outputs.version_code }},
   "zipUrl": "${{ github.event.release.zipball_url }}",
-  "changelog": "https://raw.githubusercontent.com/METEOR137/Flyme-icons/refs/heads/main/updatelog.md"
+  "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/main/updatelog.md"
 }
 EOF
+          echo "---- update.json ----"
+          cat update.json
+          echo "---------------------"
 
-      - name: Commit and push changes
+      - name: Commit and push changes if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add update.json
+
+          # 如果没有变更则跳过 commit（避免失败）
+          if git diff --cached --quiet; then
+            echo "No changes to update.json, skipping commit."
+            exit 0
+          fi
+
           git commit -m "chore: update update.json for ${{ steps.parse.outputs.tag }}"
-          git push
+          # 明确推送到 main 分支（根据你的默认分支调整）
+          git push origin HEAD:refs/heads/main
