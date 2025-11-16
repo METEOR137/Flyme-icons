@@ -4,6 +4,7 @@ on:
   release:
     types: [published]
 
+# 确保有写权限
 permissions:
   contents: write
 
@@ -17,25 +18,50 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
+      - name: Show event info (debug)
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Release JSON:"
+          cat $GITHUB_EVENT_PATH || true
+
       - name: Extract version and calculate versionCode
         id: parse
+        shell: bash
         run: |
+          set -euo pipefail
           TAG="${{ github.event.release.tag_name }}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Detected tag: '$TAG'"
 
-          # Remove leading 'v' if present and split into parts
+          # 去掉开头的 'v' 或 'V'
           VER="${TAG#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
-          MAJOR=${MAJOR:-0}
-          MINOR=${MINOR:-0}
-          PATCH=${PATCH:-0}
+          VER="${VER#V}"
+          echo "Trimmed version: '$VER'"
 
-          # versionCode formula: MAJOR*10000 + MINOR*100 + PATCH
+          # 使用 regex 提取 MAJOR.MINOR.PATCH （允许缺省 minor/patch）
+          if [[ "$VER" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))? ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[3]:-0}"
+            PATCH="${BASH_REMATCH[5]:-0}"
+            echo "Parsed version parts: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH"
+          else
+            echo "Warning: tag '$TAG' does not match X.Y.Z pattern. Defaulting to 0.0.0"
+            MAJOR=0; MINOR=0; PATCH=0
+          fi
+
+          # 计算 versionCode（如: MAJOR*10000 + MINOR*100 + PATCH）
           VERSION_CODE=$((MAJOR*10000 + MINOR*100 + PATCH))
+          echo "Calculated versionCode=$VERSION_CODE"
+
+          # 导出 outputs
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
 
       - name: Update update.json
         run: |
+          set -euo pipefail
+          echo "Writing update.json..."
           cat > update.json << EOF
 {
   "version": "${{ steps.parse.outputs.tag }}",
@@ -49,17 +75,28 @@ EOF
           echo "---------------------"
 
       - name: Commit and push changes if changed
+        env:
+          REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add update.json
 
-          # 如果没有变更则跳过 commit（避免失败）
           if git diff --cached --quiet; then
             echo "No changes to update.json, skipping commit."
             exit 0
           fi
 
           git commit -m "chore: update update.json for ${{ steps.parse.outputs.tag }}"
-          # 明确推送到 main 分支（根据你的默认分支调整）
-          git push origin HEAD:refs/heads/main
+
+          echo "Attempting to push to refs/heads/main..."
+          # 首先尝试用內建的令牌（actions/checkout persist-credentials:true）推送
+          if git push origin HEAD:refs/heads/main; then
+            echo "Push succeeded."
+          else
+            echo "Push via origin failed. Possible branch protection or permission issue."
+            echo "Attempting authenticated push using GITHUB_TOKEN (may expose in logs — this is fallback only)."
+            git push "https://${{ secrets.GITHUB_TOKEN }}@github.com/${REPO}.git" HEAD:refs/heads/main
+          fi
