@@ -23,12 +23,12 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
         # 注意：这里使用heredoc格式安全地传递多行文本
 
-      - name: Write to update.json
+      - name: Write to updatelog.md
         run: |
           # 将release notes内容写入JSON文件
-          echo "${{ env.notes }}" > update.json
+          echo "${{ env.notes }}" > updatelog.md
           # 检查文件是否生成
-          cat update.json
+          cat updatelog.md
 
       - name: Commit and push changes
         run: |
