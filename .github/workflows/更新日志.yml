@@ -14,30 +14,36 @@ jobs:
           # 明确检出主分支（例如 main 或 master）
           ref: main
           persist-credentials: true
+          fetch-depth: 0
 
       - name: Get release notes content
         id: release-notes
         run: |
-          # 使用随机边界避免冲突
+          # 生成随机边界以避免与文件内容冲突
           RANDOM_EOF=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)
           echo "notes<<$RANDOM_EOF" >> $GITHUB_ENV
-          echo "${{ github.event.release.body }}" >> $GITHUB_ENV
+          # github.event.release.body 会在 workflow 运行前被 Actions 模板扩展为实际文本
+          printf "%s\n" "${{ github.event.release.body }}" >> $GITHUB_ENV
           echo "$RANDOM_EOF" >> $GITHUB_ENV
 
       - name: Write to updatelog.md
         run: |
-          # 安全写入文件
+          # 将 release notes 安全写入文件（覆盖现有内容）
           printf "%s\n" "${{ env.notes }}" > updatelog.md
-          cat updatelog.md
+          echo "Wrote updatelog.md:"
+          sed -n '1,200p' updatelog.md || true
 
-      - name: Commit and push changes
+      - name: Commit and push changes (only if changed)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          
-          # 添加更改并提交
+
           git add updatelog.md
-          git commit -m "Update release notes from release ${{ github.event.release.tag_name }}"
-          
-          # 推送到主分支
-          git push origin main
+
+          # 如果没有 staged 变化，git diff --staged --quiet 将返回 0
+          if git diff --staged --quiet; then
+            echo "No changes to commit. Skipping commit and push."
+          else
+            git commit -m "Update release notes from release ${{ github.event.release.tag_name }}"
+            git push origin main
+          fi
