@@ -1,4 +1,4 @@
-name: Update Release Notes
+name: 更新日志
 
 on:
   release:
