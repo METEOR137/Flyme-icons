@@ -3,7 +3,6 @@ name: Update JSON on Release
 on:
   release:
     types: [published]
-  workflow_dispatch:
 
 jobs:
   update-json:
@@ -68,11 +67,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 确保本地分支是最新的
-          git pull --rebase origin main
-          
           git add update.json
           git commit -m "chore: update version to $NEW_VERSION"
-          
-          # 强制推送更新（谨慎使用）
-          git push origin HEAD:main --force
+          git push origin HEAD:main
