@@ -1,4 +1,4 @@
-name: Update update.json on Release
+name: 更新下载json.yml
 
 on:
   release:
