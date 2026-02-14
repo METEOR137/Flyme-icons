@@ -1,4 +1,4 @@
-name: Update JSON on Release
+name: 更新下载JSON
 
 on:
   release:
